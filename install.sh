@@ -1,0 +1,170 @@
+#!/bin/bash
+
+# 设置颜色变量
+GREEN='\033[0;32m'
+RED='\033[0;31m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# 函数：显示带颜色的文本
+print_color_text() {
+    local color="$1"
+    local message="$2"
+    echo "${color}${message}${NC}"
+}
+print_color_text_oneline() {
+    local color1="$1"
+    local message1="$2"
+    local color2="$3"
+    local message2="$4"
+    echo "${color1}${message1}${NC}${color2}${message2}${NC}"
+}
+
+# 函数：检查是否已经安装 Node.js
+check_node() {
+    print_color_text "检查是否已安装 Node.js ..."
+    if ! command -v node >/dev/null 2>&1; then
+        print_color_text "$RED" "未检测到 Node.js 安装，请先安装 Node.js"
+        echo "正在尝试下载并安装 Node.js ..."
+        download_install_node
+    else
+        print_color_text_oneline "$BLUE" "Node.js 已安装" "$GREEN" "  [跳过]"
+    fi
+}
+
+# 函数：检查并安装 asar
+check_and_install_asar() {
+    if ! command -v asar >/dev/null 2>&1; then
+        print_color_text "$RED" "未检测到 asar 安装，请先安装 asar"
+        echo "正在尝试安装 asar ..."
+        sudo npm install -g asar
+        if [ $? -ne 0 ]; then
+            print_color_text "$RED" "安装 asar 失败"
+            exit 1
+        fi
+    else
+        print_color_text_oneline "$BLUE" "asar 已安装" "$GREEN" "  [跳过]"
+    fi
+}
+
+# 函数：下载并安装 Node.js
+download_install_node() {
+    local node_installer="node-install.pkg"
+    local node_url="https://nodejs.org/dist/latest/node-${LATEST_NODE_VERSION}-macos-x64.pkg"
+
+    curl -sSfL "$node_url" -o "/tmp/$node_installer"
+    if [ $? -ne 0 ]; then
+        print_color_text "$RED" "下载 Node.js 失败：$node_url"
+        exit 1
+    fi
+
+    sudo installer -pkg "/tmp/$node_installer" -target /
+    if [ $? -ne 0 ]; then
+        print_color_text "$RED" "安装 Node.js 失败"
+        exit 1
+    fi
+
+    print_color_text "$GREEN" "Node.js 安装完成"
+}
+
+# 函数：恢复备份文件
+restore_backup() {
+    print_color_text "正在卸载 ..."
+    mv "$INSTALL_DIR/app.backup" "$INSTALL_DIR/app.asar"
+    rm -rf "$INSTALL_DIR/app"
+    print_color_text "$GREEN" "卸载成功"
+}
+
+# 函数：提示已安装并询问是否重新安装
+ask_reinstall() {
+    print_color_text "$RED" "已检测到备份文件，说明已安装过 Upscayl。是否要重新安装？(y/n)"
+    read -r -p "请输入 (y/n): " response
+    case "$response" in
+        [yY][eE][sS]|[yY])
+            echo "用户选择重新安装"
+            return 0
+            ;;
+        *)
+            echo "用户选择不重新安装，退出安装流程"
+            exit 0
+            ;;
+    esac
+}
+
+
+# 函数：解包 app.asar
+extract_app_asar() {
+    print_color_text "解包 app.asar ..."
+    asar extract "$INSTALL_DIR/app.asar" "$INSTALL_DIR/app"
+    if [ $? -ne 0 ]; then
+        print_color_text "$RED" "解包 app.asar 失败"
+        exit 1
+    fi
+}
+
+# 函数：重命名解压后的文件
+backup_and_rename_files() {
+    print_color_text "备份原始文件..."
+    mv "$INSTALL_DIR/app.asar" "$INSTALL_DIR/app.backup"
+    print_color_text "$GREEN" "备份成功"
+}
+
+# 函数：下载 zh-cn.js 文件
+download_zh_cn_js() {
+    print_color_text "下载 zh-cn.js 文件 ..."
+    if curl -sSfL --retry 3 --retry-delay 10 --retry-max-time 60 "https://raw.githubusercontent.com/kailous/upscayl-cn/main/zh-cn.js" -o "$ELECTRON_EXPORT_DIR/zh-cn.js" --progress-bar; then
+        print_color_text "$GREEN" "下载 zh-cn.js 文件成功"
+    else
+        print_color_text "$RED" "下载 zh-cn.js 文件失败，请检查网络连接"
+        echo "按任意键退出..."
+        read -n 1 -s -r -p "按任意键继续..."
+        print_color_text "恢复 app 文件..."
+        restore_backup
+        exit 1
+    fi
+}
+
+# 函数：修改 preload.js 文件
+modify_preload_js() {
+    print_color_text "修改 preload.js 文件 ..."
+    echo "const zhCnScript = require(\"./zh-cn\");" >> "$ELECTRON_EXPORT_DIR/preload.js"
+}
+
+# 函数：主安装流程
+main_installation() {
+    # 恢复备份文件（如果存在）并询问是否重新安装
+    if [ -f "$INSTALL_DIR/app.backup" ]; then
+        ask_reinstall
+        restore_backup
+    fi
+
+    # 检查并安装 Node.js
+    check_node
+
+    # 检查并安装 asar
+    check_and_install_asar
+
+    # 解包 app.asar
+    extract_app_asar
+
+    # 重命名解压后的文件
+    backup_and_rename_files
+
+    # 下载文件 zh-cn.js
+    download_zh_cn_js
+
+    # 修改 preload.js 文件
+    modify_preload_js
+
+    print_color_text "$GREEN" "安装完成！"
+}
+
+# 设置安装路径
+INSTALL_DIR="/Applications/Upscayl.app/Contents/Resources"
+ELECTRON_EXPORT_DIR="$INSTALL_DIR/app/export/electron"
+
+# 获取最新 Node.js 版本
+LATEST_NODE_VERSION=$(curl -sSL https://nodejs.org/dist/index.json | grep -o '"version": "[^"]*"' | head -n 1 | grep -oE "[0-9]+\.[0-9]+\.[0-9]+")
+
+# 执行主安装流程
+main_installation
