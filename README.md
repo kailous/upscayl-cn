@@ -9,6 +9,3 @@ upscayl-cn 汉化脚本
 ```bash
 curl -sSL https://raw.githubusercontent.com/kailous/upscayl-cn/main/install.sh -o install.sh && sudo sh install.sh && sudo rm install.sh
 ```
-## 需要依赖
-- node.js
-- asar
